@@ -5,14 +5,12 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSlider,
     QToolBar,
-    QWidget,
 )
 
 from ..config import ConfigManager
@@ -31,6 +29,9 @@ class MainWindow(QMainWindow):
         self.signature_scale = max(0.2, self.config.default_scale)
         self.next_signature_id = 1
         self.placing_enabled = True
+        self.preview_page_index: int | None = None
+        self.preview_pdf_x: float | None = None
+        self.preview_pdf_y: float | None = None
         self.setWindowTitle("Signature Signer")
         self.resize(self.config.window_width, self.config.window_height)
 
@@ -40,6 +41,7 @@ class MainWindow(QMainWindow):
         self.pdf_view.signatureSelected.connect(self.select_signature)
         self.pdf_view.deleteRequested.connect(self.delete_signature)
         self.pdf_view.scaleAdjustRequested.connect(self.adjust_signature_scale)
+        self.pdf_view.previewPositionChanged.connect(self.update_preview_position)
         self.setCentralWidget(self.pdf_view)
 
         self.status_label = QLabel("Open a PDF to begin")
@@ -47,6 +49,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_label)
 
         self.ensure_signature_path()
+        self._push_preview_size_to_view()
         if initial_pdf_path:
             self.open_pdf(initial_pdf_path)
 
@@ -139,6 +142,7 @@ class MainWindow(QMainWindow):
             pages.append((pixmap, pdf_width, pdf_height, self.state.zoom))
 
         self.pdf_view.set_pages(pages)
+        self._push_preview_size_to_view()
         self.refresh_signatures()
 
     def refresh_signatures(self) -> None:
@@ -146,14 +150,22 @@ class MainWindow(QMainWindow):
             page_sigs = [sig for sig in self.state.signatures if sig.page_index == page_index]
             self.pdf_view.update_page_signatures(page_index, page_sigs, self.state.selected_signature_id, self.placing_enabled)
 
+    def _signature_dimensions_pdf(self) -> tuple[float, float]:
+        width = 140.0 * self.signature_scale
+        height = width * 0.35
+        return width, height
+
+    def _push_preview_size_to_view(self) -> None:
+        width, height = self._signature_dimensions_pdf()
+        self.pdf_view.set_preview_size_pdf(width, height)
+
     def place_signature(self, page_index: int, pdf_x: float, pdf_y: float) -> None:
         if not self.config_manager.has_valid_signature(self.config):
             self.choose_signature(required=True)
             if not self.config_manager.has_valid_signature(self.config):
                 return
 
-        width = 140.0 * self.signature_scale
-        height = width * 0.35
+        width, height = self._signature_dimensions_pdf()
         page_width, page_height = self.pdf_service.page_size(page_index)
         x = max(0.0, min(pdf_x - width / 2, page_width - width))
         y = max(0.0, min(pdf_y - height / 2, page_height - height))
@@ -196,6 +208,7 @@ class MainWindow(QMainWindow):
         self.signature_scale = max(0.2, value / 100.0)
         self.config.default_scale = self.signature_scale
         self.config_manager.save(self.config)
+        self._push_preview_size_to_view()
         self.status_label.setText(f"Signature scale: {self.signature_scale:.2f}x")
 
     def adjust_signature_scale(self, step: int) -> None:
@@ -207,6 +220,11 @@ class MainWindow(QMainWindow):
         self.mode_button.setText(f"Placement: {'On' if self.placing_enabled else 'Off'}")
         self.pdf_view.set_placing_enabled(self.placing_enabled)
         self.refresh_signatures()
+
+    def update_preview_position(self, page_index: int, pdf_x: float, pdf_y: float) -> None:
+        self.preview_page_index = page_index
+        self.preview_pdf_x = pdf_x
+        self.preview_pdf_y = pdf_y
 
     def change_zoom(self, factor: float) -> None:
         if not self.state.pdf_path:

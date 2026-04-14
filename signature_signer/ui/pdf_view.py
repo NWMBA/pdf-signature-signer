@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, QSizeF, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
@@ -24,6 +24,7 @@ class PDFPageWidget(QLabel):
     signatureSelected = pyqtSignal(int)
     deleteRequested = pyqtSignal(int)
     scaleAdjustRequested = pyqtSignal(int)
+    previewPositionChanged = pyqtSignal(int, float, float)
 
     def __init__(self, page_index: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -35,6 +36,7 @@ class PDFPageWidget(QLabel):
         self.placing_enabled = False
         self.drag_signature_id: int | None = None
         self.drag_offset = QPointF()
+        self.preview_size_pdf = QSizeF(140.0, 49.0)
         self.setMouseTracking(True)
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -76,6 +78,8 @@ class PDFPageWidget(QLabel):
             return
 
         if self.placing_enabled:
+            pdf_x, pdf_y = self._widget_to_pdf(pos)
+            self.previewPositionChanged.emit(self.page_index, pdf_x, pdf_y)
             self.preview_rect = self._preview_rect_for_widget_pos(pos)
             self.update()
         super().mouseMoveEvent(event)
@@ -135,9 +139,21 @@ class PDFPageWidget(QLabel):
             painter.drawRect(self.preview_rect)
             painter.fillRect(self.preview_rect, QColor(34, 170, 85, 40))
 
+    def set_preview_size_pdf(self, width: float, height: float) -> None:
+        self.preview_size_pdf = QSizeF(width, height)
+        self.update_preview_from_current_rect()
+
+    def update_preview_from_current_rect(self) -> None:
+        if self.preview_rect is None:
+            return
+        center = self.preview_rect.center()
+        self.preview_rect = self._preview_rect_for_widget_pos(center)
+        self.update()
+
     def _preview_rect_for_widget_pos(self, pos: QPointF) -> QRectF:
-        width = min(220.0, self.width() * 0.35)
-        height = width * 0.35
+        scale = self.metrics.scale or 1.0
+        width = self.preview_size_pdf.width() * scale
+        height = self.preview_size_pdf.height() * scale
         x = max(0.0, min(pos.x() - width / 2, self.width() - width))
         y = max(0.0, min(pos.y() - height / 2, self.height() - height))
         return QRectF(x, y, width, height)
@@ -167,6 +183,7 @@ class PDFView(QScrollArea):
     signatureSelected = pyqtSignal(int)
     deleteRequested = pyqtSignal(int)
     scaleAdjustRequested = pyqtSignal(int)
+    previewPositionChanged = pyqtSignal(int, float, float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -197,6 +214,7 @@ class PDFView(QScrollArea):
             widget.signatureSelected.connect(self.signatureSelected)
             widget.deleteRequested.connect(self.deleteRequested)
             widget.scaleAdjustRequested.connect(self.scaleAdjustRequested)
+            widget.previewPositionChanged.connect(self.previewPositionChanged)
             self.layout.addWidget(widget, alignment=Qt.AlignmentFlag.AlignHCenter)
             self.page_widgets.append(widget)
         self.layout.addStretch(1)
@@ -210,3 +228,7 @@ class PDFView(QScrollArea):
     def set_placing_enabled(self, enabled: bool) -> None:
         for widget in self.page_widgets:
             widget.set_placing_enabled(enabled)
+
+    def set_preview_size_pdf(self, width: float, height: float) -> None:
+        for widget in self.page_widgets:
+            widget.set_preview_size_pdf(width, height)

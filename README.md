@@ -10,6 +10,10 @@ Sometimes you just need to drop your signature onto a PDF and save it without up
 
 This app is built for that exact job.
 
+## Screenshot
+
+![PDF Signature Signer screenshot](docs/images/screenshot.jpg)
+
 ## Features
 
 - Local-first, no network access
