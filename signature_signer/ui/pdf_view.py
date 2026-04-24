@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QPointF, QRectF, QSizeF, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
+from PyQt6.QtGui import QAction, QColor, QFont, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
-from ..models import PlacedSignature
+from ..models import PlacedStamp
 
 
 @dataclass
@@ -20,8 +20,8 @@ class PageMetrics:
 
 class PDFPageWidget(QLabel):
     placementRequested = pyqtSignal(int, float, float)
-    signatureMoved = pyqtSignal(int, int, float, float)
-    signatureSelected = pyqtSignal(int)
+    stampMoved = pyqtSignal(int, int, float, float)
+    stampSelected = pyqtSignal(int)
     deleteRequested = pyqtSignal(int)
     scaleAdjustRequested = pyqtSignal(int)
     previewPositionChanged = pyqtSignal(int, float, float)
@@ -30,13 +30,17 @@ class PDFPageWidget(QLabel):
         super().__init__(parent)
         self.page_index = page_index
         self.metrics = PageMetrics(page_index, 1.0, 1.0, 1.0)
-        self.signatures: list[PlacedSignature] = []
+        self.stamps: list[PlacedStamp] = []
         self.preview_rect: QRectF | None = None
-        self.selected_signature_id: int | None = None
+        self.selected_stamp_id: int | None = None
         self.placing_enabled = False
-        self.drag_signature_id: int | None = None
+        self.drag_stamp_id: int | None = None
         self.drag_offset = QPointF()
         self.preview_size_pdf = QSizeF(140.0, 49.0)
+        self.preview_kind = "signature"
+        self.preview_text = ""
+        self.preview_image_path = ""
+        self.last_mouse_pos = QPointF(0.0, 0.0)
         self.setMouseTracking(True)
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -53,13 +57,19 @@ class PDFPageWidget(QLabel):
         self.metrics = PageMetrics(self.page_index, pdf_width, pdf_height, scale)
         self.update()
 
-    def set_signatures(self, signatures: list[PlacedSignature], selected_signature_id: int | None) -> None:
-        self.signatures = signatures
-        self.selected_signature_id = selected_signature_id
+    def set_stamps(self, stamps: list[PlacedStamp], selected_stamp_id: int | None) -> None:
+        self.stamps = stamps
+        self.selected_stamp_id = selected_stamp_id
         self.update()
 
     def set_preview(self, rect: QRectF | None) -> None:
         self.preview_rect = rect
+        self.update()
+
+    def set_preview_payload(self, kind: str, text: str, image_path: str) -> None:
+        self.preview_kind = kind
+        self.preview_text = text
+        self.preview_image_path = image_path
         self.update()
 
     def set_placing_enabled(self, enabled: bool) -> None:
@@ -68,13 +78,20 @@ class PDFPageWidget(QLabel):
             self.preview_rect = None
         self.update()
 
+    def set_preview_position_pdf(self, pdf_x: float, pdf_y: float) -> None:
+        scale = self.metrics.scale or 1.0
+        self.last_mouse_pos = QPointF(pdf_x * scale, pdf_y * scale)
+        self.preview_rect = self._preview_rect_for_widget_pos(self.last_mouse_pos)
+        self.update()
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = event.position()
-        if self.drag_signature_id is not None:
+        self.last_mouse_pos = pos
+        if self.drag_stamp_id is not None:
             x = max(0.0, min(pos.x() - self.drag_offset.x(), self.width()))
             y = max(0.0, min(pos.y() - self.drag_offset.y(), self.height()))
             pdf_x, pdf_y = self._widget_to_pdf(QPointF(x, y))
-            self.signatureMoved.emit(self.page_index, self.drag_signature_id, pdf_x, pdf_y)
+            self.stampMoved.emit(self.page_index, self.drag_stamp_id, pdf_x, pdf_y)
             return
 
         if self.placing_enabled:
@@ -88,10 +105,10 @@ class PDFPageWidget(QLabel):
         pos = event.position()
         hit = self._hit_test(pos)
         if hit is not None:
-            self.selected_signature_id = hit.id
-            self.signatureSelected.emit(hit.id)
+            self.selected_stamp_id = hit.id
+            self.stampSelected.emit(hit.id)
             rect = self._pdf_rect_to_widget(hit)
-            self.drag_signature_id = hit.id
+            self.drag_stamp_id = hit.id
             self.drag_offset = QPointF(pos.x() - rect.x(), pos.y() - rect.y())
             self.update()
             return
@@ -104,13 +121,15 @@ class PDFPageWidget(QLabel):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        self.drag_signature_id = None
+        self.drag_stamp_id = None
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self.placing_enabled:
             step = 1 if event.angleDelta().y() > 0 else -1
             self.scaleAdjustRequested.emit(step)
+            self.preview_rect = self._preview_rect_for_widget_pos(self.last_mouse_pos)
+            self.update()
             event.accept()
             return
         super().wheelEvent(event)
@@ -119,17 +138,15 @@ class PDFPageWidget(QLabel):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
-        for sig in self.signatures:
-            rect = self._pdf_rect_to_widget(sig)
-            pen = QPen(QColor("#cc3333") if sig.id == self.selected_signature_id else QColor("#2277cc"))
+        for stamp in self.stamps:
+            rect = self._pdf_rect_to_widget(stamp)
+            pen = QPen(QColor("#cc3333") if stamp.id == self.selected_stamp_id else QColor("#2277cc"))
             pen.setWidth(2)
             painter.setPen(pen)
             painter.drawRect(rect)
-            if Path(sig.image_path).is_file():
-                pix = QPixmap(sig.image_path)
-                if not pix.isNull():
-                    painter.drawPixmap(rect.toRect(), pix)
+            self._draw_stamp_content(painter, stamp.kind, rect, stamp.text, stamp.image_path)
 
         if self.preview_rect is not None:
             pen = QPen(QColor("#22aa55"))
@@ -138,15 +155,48 @@ class PDFPageWidget(QLabel):
             painter.setPen(pen)
             painter.drawRect(self.preview_rect)
             painter.fillRect(self.preview_rect, QColor(34, 170, 85, 40))
+            self._draw_stamp_content(
+                painter,
+                self.preview_kind,
+                self.preview_rect,
+                self.preview_text,
+                self.preview_image_path,
+                preview=True,
+            )
+
+    def _draw_stamp_content(
+        self,
+        painter: QPainter,
+        kind: str,
+        rect: QRectF,
+        text: str,
+        image_path: str,
+        preview: bool = False,
+    ) -> None:
+        if kind == "signature":
+            if Path(image_path).is_file():
+                pix = QPixmap(image_path)
+                if not pix.isNull():
+                    painter.drawPixmap(rect.toRect(), pix)
+            return
+
+        painter.save()
+        painter.setPen(QColor("#555555") if preview else QColor("#000000"))
+        font = QFont("Helvetica")
+        font.setPixelSize(max(10, int(rect.height() * 0.58)))
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.restore()
 
     def set_preview_size_pdf(self, width: float, height: float) -> None:
         self.preview_size_pdf = QSizeF(width, height)
         self.update_preview_from_current_rect()
 
     def update_preview_from_current_rect(self) -> None:
-        if self.preview_rect is None:
-            return
-        center = self.preview_rect.center()
+        if self.preview_rect is not None:
+            center = self.preview_rect.center()
+        else:
+            center = self.last_mouse_pos
         self.preview_rect = self._preview_rect_for_widget_pos(center)
         self.update()
 
@@ -162,25 +212,25 @@ class PDFPageWidget(QLabel):
         scale = self.metrics.scale or 1.0
         return pos.x() / scale, pos.y() / scale
 
-    def _pdf_rect_to_widget(self, sig: PlacedSignature) -> QRectF:
+    def _pdf_rect_to_widget(self, stamp: PlacedStamp) -> QRectF:
         scale = self.metrics.scale or 1.0
-        return QRectF(sig.x * scale, sig.y * scale, sig.width * scale, sig.height * scale)
+        return QRectF(stamp.x * scale, stamp.y * scale, stamp.width * scale, stamp.height * scale)
 
-    def _hit_test(self, pos: QPointF) -> PlacedSignature | None:
-        for sig in reversed(self.signatures):
-            if self._pdf_rect_to_widget(sig).contains(pos):
-                return sig
+    def _hit_test(self, pos: QPointF) -> PlacedStamp | None:
+        for stamp in reversed(self.stamps):
+            if self._pdf_rect_to_widget(stamp).contains(pos):
+                return stamp
         return None
 
     def _delete_selected(self) -> None:
-        if self.selected_signature_id is not None:
-            self.deleteRequested.emit(self.selected_signature_id)
+        if self.selected_stamp_id is not None:
+            self.deleteRequested.emit(self.selected_stamp_id)
 
 
 class PDFView(QScrollArea):
     placementRequested = pyqtSignal(int, float, float)
-    signatureMoved = pyqtSignal(int, int, float, float)
-    signatureSelected = pyqtSignal(int)
+    stampMoved = pyqtSignal(int, int, float, float)
+    stampSelected = pyqtSignal(int)
     deleteRequested = pyqtSignal(int)
     scaleAdjustRequested = pyqtSignal(int)
     previewPositionChanged = pyqtSignal(int, float, float)
@@ -210,8 +260,8 @@ class PDFView(QScrollArea):
             widget = PDFPageWidget(page_index)
             widget.set_page(pixmap, pdf_width, pdf_height, scale)
             widget.placementRequested.connect(self.placementRequested)
-            widget.signatureMoved.connect(self.signatureMoved)
-            widget.signatureSelected.connect(self.signatureSelected)
+            widget.stampMoved.connect(self.stampMoved)
+            widget.stampSelected.connect(self.stampSelected)
             widget.deleteRequested.connect(self.deleteRequested)
             widget.scaleAdjustRequested.connect(self.scaleAdjustRequested)
             widget.previewPositionChanged.connect(self.previewPositionChanged)
@@ -219,10 +269,10 @@ class PDFView(QScrollArea):
             self.page_widgets.append(widget)
         self.layout.addStretch(1)
 
-    def update_page_signatures(self, page_index: int, signatures: list[PlacedSignature], selected_signature_id: int | None, placing_enabled: bool) -> None:
+    def update_page_stamps(self, page_index: int, stamps: list[PlacedStamp], selected_stamp_id: int | None, placing_enabled: bool) -> None:
         if 0 <= page_index < len(self.page_widgets):
             widget = self.page_widgets[page_index]
-            widget.set_signatures(signatures, selected_signature_id)
+            widget.set_stamps(stamps, selected_stamp_id)
             widget.set_placing_enabled(placing_enabled)
 
     def set_placing_enabled(self, enabled: bool) -> None:
@@ -232,3 +282,11 @@ class PDFView(QScrollArea):
     def set_preview_size_pdf(self, width: float, height: float) -> None:
         for widget in self.page_widgets:
             widget.set_preview_size_pdf(width, height)
+
+    def set_preview_payload(self, kind: str, text: str, image_path: str) -> None:
+        for widget in self.page_widgets:
+            widget.set_preview_payload(kind, text, image_path)
+
+    def set_preview_position_pdf(self, page_index: int, pdf_x: float, pdf_y: float) -> None:
+        if 0 <= page_index < len(self.page_widgets):
+            self.page_widgets[page_index].set_preview_position_pdf(pdf_x, pdf_y)

@@ -8,6 +8,9 @@ from typing import Optional
 @dataclass
 class AppConfig:
     signature_path: str = ""
+    signer_name: str = ""
+    signer_city: str = ""
+    date_format: str = "%Y-%m-%d"
     last_open_dir: str = str(Path.home())
     default_scale: float = 1.0
     wheel_scale_step: float = 0.1
@@ -16,13 +19,15 @@ class AppConfig:
 
 
 @dataclass
-class PlacedSignature:
+class PlacedStamp:
     page_index: int
     x: float
     y: float
     width: float
     height: float
-    image_path: str
+    kind: str
+    image_path: str = ""
+    text: str = ""
     id: int = field(default=0)
 
 
@@ -31,5 +36,5 @@ class DocumentState:
     pdf_path: Optional[str] = None
     page_count: int = 0
     zoom: float = 1.0
-    signatures: list[PlacedSignature] = field(default_factory=list)
-    selected_signature_id: Optional[int] = None
+    stamps: list[PlacedStamp] = field(default_factory=list)
+    selected_stamp_id: Optional[int] = None

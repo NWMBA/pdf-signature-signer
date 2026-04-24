@@ -5,7 +5,7 @@ from pathlib import Path
 import fitz
 from PyQt6.QtGui import QImage, QPixmap
 
-from .models import PlacedSignature
+from .models import PlacedStamp
 
 
 class PDFDocumentService:
@@ -47,16 +47,28 @@ class PDFDocumentService:
         ).copy()
         return QPixmap.fromImage(image)
 
-    def save_with_signatures(self, output_path: str, signatures: list[PlacedSignature]) -> None:
+    def save_with_stamps(self, output_path: str, stamps: list[PlacedStamp]) -> None:
         if not self.path:
             raise ValueError("No PDF open")
 
         source = fitz.open(self.path)
         try:
-            for sig in signatures:
-                page = source[sig.page_index]
-                rect = fitz.Rect(sig.x, sig.y, sig.x + sig.width, sig.y + sig.height)
-                page.insert_image(rect, filename=sig.image_path, keep_proportion=True, overlay=True)
+            for stamp in stamps:
+                page = source[stamp.page_index]
+                rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
+                if stamp.kind == "signature":
+                    page.insert_image(rect, filename=stamp.image_path, keep_proportion=True, overlay=True)
+                else:
+                    fontsize = max(8.0, stamp.height * 0.58)
+                    page.insert_textbox(
+                        rect,
+                        stamp.text,
+                        fontname="helv",
+                        fontsize=fontsize,
+                        color=(0, 0, 0),
+                        align=fitz.TEXT_ALIGN_LEFT,
+                        overlay=True,
+                    )
             source.save(output_path)
         finally:
             source.close()
