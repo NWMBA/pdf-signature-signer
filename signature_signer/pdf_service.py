@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import fitz
-from PyQt6.QtGui import QImage, QPixmap
 
 from .models import PlacedStamp
+from .pdf_geometry import displayed_rect_to_pdf_rect
 
 
 class PDFDocumentService:
@@ -34,7 +35,9 @@ class PDFDocumentService:
         rect = page.rect
         return rect.width, rect.height
 
-    def render_page(self, page_index: int, zoom: float) -> QPixmap:
+    def render_page(self, page_index: int, zoom: float):
+        from PyQt6.QtGui import QImage, QPixmap
+
         page = self._page(page_index)
         matrix = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=matrix, alpha=False)
@@ -51,11 +54,16 @@ class PDFDocumentService:
         if not self.path:
             raise ValueError("No PDF open")
 
-        source = fitz.open(self.path)
+        source_path = Path(self.path).resolve()
+        target_path = Path(output_path).resolve()
+        overwriting_original = source_path == target_path
+        temp_output: Path | None = None
+        source = fitz.open(source_path)
         try:
             for stamp in stamps:
                 page = source[stamp.page_index]
-                rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
+                displayed_rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
+                rect = displayed_rect_to_pdf_rect(page, displayed_rect)
                 if stamp.kind == "signature":
                     page.insert_image(rect, filename=stamp.image_path, keep_proportion=True, overlay=True)
                 else:
@@ -69,9 +77,29 @@ class PDFDocumentService:
                         align=fitz.TEXT_ALIGN_LEFT,
                         overlay=True,
                     )
-            source.save(output_path)
+
+            if overwriting_original:
+                with NamedTemporaryFile(
+                    prefix=f".{source_path.stem}-",
+                    suffix=source_path.suffix,
+                    dir=source_path.parent,
+                    delete=False,
+                ) as temp_file:
+                    temp_output = Path(temp_file.name)
+                source.save(temp_output, garbage=4, deflate=True)
+            else:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                source.save(target_path, garbage=4, deflate=True)
         finally:
             source.close()
+
+        if overwriting_original and temp_output is not None:
+            if self.doc is not None:
+                self.doc.close()
+                self.doc = None
+            temp_output.replace(source_path)
+            self.doc = fitz.open(source_path)
+            self.path = str(source_path)
 
     def _page(self, page_index: int) -> fitz.Page:
         if self.doc is None:
