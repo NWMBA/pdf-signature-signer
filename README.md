@@ -22,6 +22,7 @@ This app is built for that exact job.
 - Scrollable multi-page PDF view
 - Live signature preview under cursor
 - Resize signature with a slider or mouse wheel while placing
+- Rotate the stamp in 90° steps if a PDF or image orientation is odd
 - Drag placed signatures before saving
 - Delete selected signatures before saving
 - Save As by default, overwrite only with confirmation

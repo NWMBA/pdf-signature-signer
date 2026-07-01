@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QPointF, QRectF, QSizeF, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QFont, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
+from PyQt6.QtGui import QAction, QColor, QFont, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ..models import PlacedStamp
@@ -40,6 +40,7 @@ class PDFPageWidget(QLabel):
         self.preview_kind = "signature"
         self.preview_text = ""
         self.preview_image_path = ""
+        self.preview_rotation = 0
         self.last_mouse_pos = QPointF(0.0, 0.0)
         self.setMouseTracking(True)
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
@@ -66,10 +67,11 @@ class PDFPageWidget(QLabel):
         self.preview_rect = rect
         self.update()
 
-    def set_preview_payload(self, kind: str, text: str, image_path: str) -> None:
+    def set_preview_payload(self, kind: str, text: str, image_path: str, rotation: int = 0) -> None:
         self.preview_kind = kind
         self.preview_text = text
         self.preview_image_path = image_path
+        self.preview_rotation = rotation % 360
         self.update()
 
     def set_placing_enabled(self, enabled: bool) -> None:
@@ -146,7 +148,7 @@ class PDFPageWidget(QLabel):
             pen.setWidth(2)
             painter.setPen(pen)
             painter.drawRect(rect)
-            self._draw_stamp_content(painter, stamp.kind, rect, stamp.text, stamp.image_path)
+            self._draw_stamp_content(painter, stamp.kind, rect, stamp.text, stamp.image_path, stamp.rotation)
 
         if self.preview_rect is not None:
             pen = QPen(QColor("#22aa55"))
@@ -161,6 +163,7 @@ class PDFPageWidget(QLabel):
                 self.preview_rect,
                 self.preview_text,
                 self.preview_image_path,
+                self.preview_rotation,
                 preview=True,
             )
 
@@ -171,13 +174,17 @@ class PDFPageWidget(QLabel):
         rect: QRectF,
         text: str,
         image_path: str,
+        rotation: int = 0,
         preview: bool = False,
     ) -> None:
         if kind == "signature":
             if Path(image_path).is_file():
                 pix = QPixmap(image_path)
                 if not pix.isNull():
-                    painter.drawPixmap(rect.toRect(), pix)
+                    display_pix = pix
+                    if rotation % 360:
+                        display_pix = pix.transformed(QTransform().rotate(rotation % 360), Qt.TransformationMode.SmoothTransformation)
+                    painter.drawPixmap(rect.toRect(), display_pix)
             return
 
         painter.save()
@@ -283,9 +290,9 @@ class PDFView(QScrollArea):
         for widget in self.page_widgets:
             widget.set_preview_size_pdf(width, height)
 
-    def set_preview_payload(self, kind: str, text: str, image_path: str) -> None:
+    def set_preview_payload(self, kind: str, text: str, image_path: str, rotation: int = 0) -> None:
         for widget in self.page_widgets:
-            widget.set_preview_payload(kind, text, image_path)
+            widget.set_preview_payload(kind, text, image_path, rotation)
 
     def set_preview_position_pdf(self, page_index: int, pdf_x: float, pdf_y: float) -> None:
         if 0 <= page_index < len(self.page_widgets):

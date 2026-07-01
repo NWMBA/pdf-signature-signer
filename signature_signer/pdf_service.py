@@ -64,8 +64,9 @@ class PDFDocumentService:
                 page = source[stamp.page_index]
                 displayed_rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
                 rect = displayed_rect_to_pdf_rect(page, displayed_rect)
+                write_rotation = (page.rotation + stamp.rotation) % 360
                 if stamp.kind == "signature":
-                    page.insert_image(rect, filename=stamp.image_path, keep_proportion=True, overlay=True)
+                    page.insert_image(rect, filename=stamp.image_path, keep_proportion=True, overlay=True, rotate=write_rotation)
                 else:
                     fontsize = max(8.0, stamp.height * 0.58)
                     page.insert_textbox(
@@ -76,6 +77,7 @@ class PDFDocumentService:
                         color=(0, 0, 0),
                         align=fitz.TEXT_ALIGN_LEFT,
                         overlay=True,
+                        rotate=write_rotation,
                     )
 
             if overwriting_original:

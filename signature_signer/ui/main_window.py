@@ -74,6 +74,7 @@ class MainWindow(QMainWindow):
         self.pdf_service = PDFDocumentService()
         self.state = DocumentState(zoom=1.0)
         self.stamp_scale = max(0.2, self.config.default_scale)
+        self.stamp_rotation = self.config.stamp_rotation % 360
         self.next_stamp_id = 1
         self.placing_enabled = True
         self.preview_page_index: int | None = None
@@ -155,6 +156,10 @@ class MainWindow(QMainWindow):
         self.scale_slider.setFixedWidth(180)
         toolbar.addWidget(self.scale_slider)
 
+        self.rotate_button = QPushButton(f"Rotate: {self.stamp_rotation}°")
+        self.rotate_button.clicked.connect(self.rotate_stamp)
+        toolbar.addWidget(self.rotate_button)
+
         toolbar.addSeparator()
         self.mode_button = QPushButton("Placement: On")
         self.mode_button.clicked.connect(self.toggle_placement_mode)
@@ -226,7 +231,7 @@ class MainWindow(QMainWindow):
 
     def _push_preview_payload_to_view(self) -> None:
         text = self._stamp_text_for_mode(self.current_mode)
-        self.pdf_view.set_preview_payload(self.current_mode, text, self.config.signature_path)
+        self.pdf_view.set_preview_payload(self.current_mode, text, self.config.signature_path, self.stamp_rotation)
 
     def on_mode_changed(self) -> None:
         self.current_mode = self.mode_selector.currentData()
@@ -305,6 +310,7 @@ class MainWindow(QMainWindow):
             kind=self.current_mode,
             image_path=self.config.signature_path if self.current_mode == self.MODE_SIGNATURE else "",
             text=self._stamp_text_for_mode(self.current_mode),
+            rotation=self.stamp_rotation,
             id=self.next_stamp_id,
         )
         self.next_stamp_id += 1
@@ -346,6 +352,14 @@ class MainWindow(QMainWindow):
     def adjust_stamp_scale(self, step: int) -> None:
         value = max(self.scale_slider.minimum(), min(self.scale_slider.maximum(), self.scale_slider.value() + step * 10))
         self.scale_slider.setValue(value)
+
+    def rotate_stamp(self) -> None:
+        self.stamp_rotation = (self.stamp_rotation + 90) % 360
+        self.config.stamp_rotation = self.stamp_rotation
+        self.config_manager.save(self.config)
+        self.rotate_button.setText(f"Rotate: {self.stamp_rotation}°")
+        self._push_preview_payload_to_view()
+        self.status_label.setText(f"Stamp rotation: {self.stamp_rotation}°")
 
     def toggle_placement_mode(self) -> None:
         self.placing_enabled = not self.placing_enabled

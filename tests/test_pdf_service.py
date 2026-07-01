@@ -73,6 +73,22 @@ def test_save_with_stamps_honors_display_coordinates_on_rotated_pages(tmp_path: 
     doc = fitz.open(output_path)
     image_rects = doc[0].get_image_rects(doc[0].get_images(full=True)[0][0])
     assert image_rects == [fitz.Rect(432, 72, 552, 112)]
+
+    rendered = doc[0].get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False)
+    red_left = red_right = red_top = red_bottom = 0
+    for y in range(680, 720):
+        for x in range(60, 180):
+            offset = (y * rendered.width + x) * 3
+            r, g, b = rendered.samples[offset : offset + 3]
+            if r > 200 and g < 80 and b < 80:
+                local_x = x - 60
+                local_y = y - 680
+                red_left += int(local_x < 20)
+                red_right += int(local_x >= 100)
+                red_top += int(local_y < 10)
+                red_bottom += int(local_y >= 30)
+    assert red_left > red_right
+    assert red_bottom > red_top
     doc.close()
 
 

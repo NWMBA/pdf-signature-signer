@@ -13,6 +13,7 @@ class AppConfig:
     date_format: str = "%Y-%m-%d"
     last_open_dir: str = str(Path.home())
     default_scale: float = 1.0
+    stamp_rotation: int = 0
     wheel_scale_step: float = 0.1
     window_width: int = 1200
     window_height: int = 900
@@ -28,6 +29,7 @@ class PlacedStamp:
     kind: str
     image_path: str = ""
     text: str = ""
+    rotation: int = 0
     id: int = field(default=0)
 
 
