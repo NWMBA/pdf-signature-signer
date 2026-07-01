@@ -92,6 +92,37 @@ def test_save_with_stamps_honors_display_coordinates_on_rotated_pages(tmp_path: 
     doc.close()
 
 
+def test_save_with_stamps_keeps_top_left_display_coordinates_on_unrotated_pages(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "unrotated.pdf"
+    output_path = tmp_path / "signed.pdf"
+    signature_path = tmp_path / "signature.png"
+    _write_rotated_pdf(pdf_path, rotation=0)
+    _write_test_signature(signature_path)
+
+    service = PDFDocumentService()
+    service.open(str(pdf_path))
+    service.save_with_stamps(
+        str(output_path),
+        [
+            PlacedStamp(
+                page_index=0,
+                x=460,
+                y=126,
+                width=120,
+                height=40,
+                kind="signature",
+                image_path=str(signature_path),
+            )
+        ],
+    )
+    service.close()
+
+    doc = fitz.open(output_path)
+    image_rects = doc[0].get_image_rects(doc[0].get_images(full=True)[0][0])
+    assert image_rects == [fitz.Rect(460, 126, 580, 166)]
+    doc.close()
+
+
 def test_save_with_stamps_can_overwrite_original_without_incremental_error(tmp_path: Path) -> None:
     pdf_path = tmp_path / "original.pdf"
     signature_path = tmp_path / "signature.png"
