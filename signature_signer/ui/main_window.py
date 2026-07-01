@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .. import __build__, __version__
 from ..config import ConfigManager
 from ..models import AppConfig, DocumentState, PlacedStamp
 from ..pdf_service import PDFDocumentService
@@ -81,7 +82,7 @@ class MainWindow(QMainWindow):
         self.preview_pdf_x: float | None = None
         self.preview_pdf_y: float | None = None
         self.current_mode = self.MODE_SIGNATURE
-        self.setWindowTitle("Signature Signer")
+        self.setWindowTitle(f"Signature Signer {__version__} ({__build__})")
         self.resize(self.config.window_width, self.config.window_height)
 
         self.pdf_view = PDFView()
