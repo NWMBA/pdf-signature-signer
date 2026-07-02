@@ -9,6 +9,45 @@ from .models import PlacedStamp
 from .pdf_geometry import displayed_rect_to_pdf_rect
 
 
+def signature_image_bytes_for_pdf(image_path: str, rotation: int = 0) -> bytes:
+    """Return PNG bytes matching the Qt preview path.
+
+    The GUI preview draws signature images with Qt. Saving used to pass the
+    original PNG path directly to MuPDF, which means Qt and MuPDF could disagree
+    about image orientation metadata or pixel normalization. Normalize through
+    Qt first, then embed those exact PNG bytes with MuPDF.
+    """
+    try:
+        from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
+        from PyQt6.QtGui import QImageReader, QTransform
+    except ImportError:
+        # Headless test/container environments may lack desktop libraries needed
+        # by QtGui. The desktop app itself requires Qt; this fallback keeps the
+        # non-GUI PDF tests runnable there.
+        if rotation % 360:
+            raise
+        return Path(image_path).read_bytes()
+
+    reader = QImageReader(image_path)
+    reader.setAutoTransform(True)
+    image = reader.read()
+    if image.isNull():
+        raise ValueError(f"Could not read signature image: {image_path}")
+
+    normalized_rotation = rotation % 360
+    if normalized_rotation:
+        image = image.transformed(QTransform().rotate(normalized_rotation))
+
+    data = QByteArray()
+    buffer = QBuffer(data)
+    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+        raise ValueError("Could not prepare signature image for PDF output")
+    if not image.save(buffer, "PNG"):
+        raise ValueError("Could not encode signature image for PDF output")
+    buffer.close()
+    return bytes(data)
+
+
 class PDFDocumentService:
     def __init__(self) -> None:
         self.doc: fitz.Document | None = None
@@ -64,10 +103,12 @@ class PDFDocumentService:
                 page = source[stamp.page_index]
                 displayed_rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
                 rect = displayed_rect_to_pdf_rect(page, displayed_rect)
-                write_rotation = (page.rotation + stamp.rotation) % 360
                 if stamp.kind == "signature":
-                    page.insert_image(rect, filename=stamp.image_path, keep_proportion=True, overlay=True, rotate=write_rotation)
+                    image_bytes = signature_image_bytes_for_pdf(stamp.image_path, stamp.rotation)
+                    write_rotation = page.rotation % 360
+                    page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True, rotate=write_rotation)
                 else:
+                    write_rotation = (page.rotation + stamp.rotation) % 360
                     fontsize = max(8.0, stamp.height * 0.58)
                     page.insert_textbox(
                         rect,
