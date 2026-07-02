@@ -3,7 +3,7 @@ Quick Start
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install PyQt6 PyMuPDF
+pip install -r requirements.txt
 
 Run:
 python3 -m signature_signer.main /path/to/file.pdf

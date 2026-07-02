@@ -34,8 +34,17 @@ git clone https://github.com/NWMBA/pdf-signature-signer.git
 cd pdf-signature-signer
 python3 -m venv .venv
 source .venv/bin/activate
-pip install PyQt6 PyMuPDF
+pip install -r requirements.txt
 python3 -m signature_signer /path/to/file.pdf
+```
+
+The dependency versions are pinned because PDF rendering/stamping behavior can vary across PyMuPDF/MuPDF releases. If one computer works and another starts saving stamps upside down after system updates, reinstall the virtualenv from `requirements.txt` before debugging the PDF itself.
+
+To print the active Python, PyMuPDF, Qt package versions, and optional PDF geometry diagnostics:
+
+```bash
+python3 -m signature_signer.diagnostics
+python3 -m signature_signer.diagnostics /path/to/original.pdf /path/to/broken-signed.pdf
 ```
 
 ## Linux notes
