@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QPointF, QRectF, QSizeF, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QFont, QMouseEvent, QPainter, QPen, QPixmap, QTransform, QWheelEvent
+from PyQt6.QtGui import QAction, QColor, QFont, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ..models import PlacedStamp
+from ..pdf_service import signature_image_bytes_for_pdf
 
 
 @dataclass
@@ -179,12 +180,13 @@ class PDFPageWidget(QLabel):
     ) -> None:
         if kind == "signature":
             if Path(image_path).is_file():
-                pix = QPixmap(image_path)
-                if not pix.isNull():
-                    display_pix = pix
-                    if rotation % 360:
-                        display_pix = pix.transformed(QTransform().rotate(rotation % 360), Qt.TransformationMode.SmoothTransformation)
-                    painter.drawPixmap(rect.toRect(), display_pix)
+                pix = QPixmap()
+                try:
+                    image_bytes = signature_image_bytes_for_pdf(image_path, rotation)
+                except Exception:
+                    image_bytes = b""
+                if image_bytes and pix.loadFromData(image_bytes, "PNG") and not pix.isNull():
+                    painter.drawPixmap(rect.toRect(), pix)
             return
 
         painter.save()
