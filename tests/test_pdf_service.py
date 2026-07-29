@@ -210,7 +210,7 @@ def test_save_with_stamps_bakes_signature_rotation_before_pdf_insert(tmp_path: P
     doc.close()
 
 
-def test_save_with_stamps_preserves_selectable_text_with_full_page_overlay(tmp_path: Path) -> None:
+def test_save_with_stamps_keeps_top_left_display_coordinates_on_unrotated_pages(tmp_path: Path) -> None:
     pdf_path = tmp_path / "unrotated.pdf"
     output_path = tmp_path / "signed.pdf"
     signature_path = tmp_path / "signature.png"
@@ -236,8 +236,7 @@ def test_save_with_stamps_preserves_selectable_text_with_full_page_overlay(tmp_p
     service.close()
 
     doc = fitz.open(output_path)
-    assert "Top marker" in doc[0].get_text("text")
-    image_rects = doc[0].get_image_rects(doc[0].get_images(full=True)[-1][0])
+    image_rects = doc[0].get_image_rects(doc[0].get_images(full=True)[0][0])
     assert image_rects == [doc[0].rect]
     rendered = doc[0].get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False)
     red_pixels = 0

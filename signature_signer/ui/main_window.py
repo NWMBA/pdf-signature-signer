@@ -76,7 +76,6 @@ class MainWindow(QMainWindow):
         self.state = DocumentState(zoom=1.0)
         self.stamp_scale = max(0.2, self.config.default_scale)
         self.stamp_rotation = self.config.stamp_rotation % 360
-        self.signature_orientation_correction = self.config.signature_orientation_correction % 360
         self.next_stamp_id = 1
         self.placing_enabled = True
         self.preview_page_index: int | None = None
@@ -162,10 +161,6 @@ class MainWindow(QMainWindow):
         self.rotate_button.clicked.connect(self.rotate_stamp)
         toolbar.addWidget(self.rotate_button)
 
-        self.signature_flip_button = QPushButton(self._signature_flip_label())
-        self.signature_flip_button.clicked.connect(self.toggle_signature_orientation)
-        toolbar.addWidget(self.signature_flip_button)
-
         toolbar.addSeparator()
         self.mode_button = QPushButton("Placement: On")
         self.mode_button.clicked.connect(self.toggle_placement_mode)
@@ -231,20 +226,13 @@ class MainWindow(QMainWindow):
         height = 26.0 * self.stamp_scale
         return width, height
 
-    def _effective_signature_rotation(self) -> int:
-        return (self.stamp_rotation + self.signature_orientation_correction) % 360
-
-    def _signature_flip_label(self) -> str:
-        return "Signature: Flipped 180°" if self.signature_orientation_correction % 360 == 180 else "Signature: Normal"
-
     def _push_preview_size_to_view(self) -> None:
         width, height = self._stamp_dimensions_pdf()
         self.pdf_view.set_preview_size_pdf(width, height)
 
     def _push_preview_payload_to_view(self) -> None:
         text = self._stamp_text_for_mode(self.current_mode)
-        rotation = self._effective_signature_rotation() if self.current_mode == self.MODE_SIGNATURE else self.stamp_rotation
-        self.pdf_view.set_preview_payload(self.current_mode, text, self.config.signature_path, rotation)
+        self.pdf_view.set_preview_payload(self.current_mode, text, self.config.signature_path, self.stamp_rotation)
 
     def on_mode_changed(self) -> None:
         self.current_mode = self.mode_selector.currentData()
@@ -323,7 +311,7 @@ class MainWindow(QMainWindow):
             kind=self.current_mode,
             image_path=self.config.signature_path if self.current_mode == self.MODE_SIGNATURE else "",
             text=self._stamp_text_for_mode(self.current_mode),
-            rotation=self._effective_signature_rotation() if self.current_mode == self.MODE_SIGNATURE else self.stamp_rotation,
+            rotation=self.stamp_rotation,
             id=self.next_stamp_id,
         )
         self.next_stamp_id += 1
@@ -382,14 +370,6 @@ class MainWindow(QMainWindow):
         self.rotate_button.setText(f"Rotate: {self.stamp_rotation}°")
         self._push_preview_payload_to_view()
         self.status_label.setText(f"New stamp rotation: {self.stamp_rotation}°")
-
-    def toggle_signature_orientation(self) -> None:
-        self.signature_orientation_correction = 0 if self.signature_orientation_correction % 360 == 180 else 180
-        self.config.signature_orientation_correction = self.signature_orientation_correction
-        self.config_manager.save(self.config)
-        self.signature_flip_button.setText(self._signature_flip_label())
-        self._push_preview_payload_to_view()
-        self.status_label.setText(self._signature_flip_label())
 
     def toggle_placement_mode(self) -> None:
         self.placing_enabled = not self.placing_enabled

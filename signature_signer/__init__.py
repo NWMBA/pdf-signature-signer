@@ -1,4 +1,4 @@
 """PDF Signature Signer package."""
 
-__version__ = "0.3.1"
-__build__ = "signature-flip-toggle"
+__version__ = "0.2.1"
+__build__ = "flattened-save-stable"

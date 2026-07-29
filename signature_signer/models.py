@@ -14,7 +14,6 @@ class AppConfig:
     last_open_dir: str = str(Path.home())
     default_scale: float = 1.0
     stamp_rotation: int = 0
-    signature_orientation_correction: int = 180
     wheel_scale_step: float = 0.1
     window_width: int = 1200
     window_height: int = 900

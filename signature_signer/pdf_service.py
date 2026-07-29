@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -9,11 +8,11 @@ import fitz
 
 from .models import PlacedStamp
 
-OVERLAY_SCALE = 3.0
+FLATTEN_SCALE = 3.0
 
 
 def signature_image_bytes_for_pdf(image_path: str, rotation: int = 0) -> bytes:
-    """Return PNG bytes for both preview and PDF output.
+    """Return PNG bytes for both preview and flattened PDF output.
 
     The signer has one non-negotiable rule: what the user sees in the live
     preview must be what gets saved into the PDF. Qt's image reader is used here
@@ -58,9 +57,9 @@ def _qimage_to_png_bytes(image) -> bytes:
     data = QByteArray()
     buffer = QBuffer(data)
     if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
-        raise ValueError("Could not prepare transparent stamp overlay")
+        raise ValueError("Could not prepare flattened page image")
     if not image.save(buffer, "PNG"):
-        raise ValueError("Could not encode transparent stamp overlay")
+        raise ValueError("Could not encode flattened page image")
     buffer.close()
     return bytes(data)
 
@@ -104,51 +103,27 @@ def _draw_text_stamp(painter, stamp: PlacedStamp, scale: float) -> None:
     painter.restore()
 
 
-def _stamp_for_overlay_coordinates(page: fitz.Page, stamp: PlacedStamp) -> PlacedStamp:
-    displayed_rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
-    overlay_rect = fitz.Rect(displayed_rect) * page.derotation_matrix
-    overlay_rect.normalize()
-    return replace(
-        stamp,
-        x=overlay_rect.x0,
-        y=overlay_rect.y0,
-        width=overlay_rect.width,
-        height=overlay_rect.height,
-        rotation=(stamp.rotation + page.rotation) % 360,
-    )
+def _flatten_page_to_png_bytes(page: fitz.Page, stamps: list[PlacedStamp], scale: float = FLATTEN_SCALE) -> bytes:
+    """Render the page and draw stamps into the pixels that become the output.
 
-
-def _transparent_overlay_png_bytes(
-    page: fitz.Page,
-    stamps: list[PlacedStamp],
-    scale: float = OVERLAY_SCALE,
-) -> bytes:
-    """Draw stamps into a full-page transparent overlay image.
-
-    The output PDF keeps the original page content underneath, so text remains
-    selectable. Stamps are drawn into one page-sized image first, then that image
-    is inserted over the full page. This avoids the old small-image placement
-    path that was vulnerable to page/image transform surprises.
+    This deliberately avoids PDF overlay transforms such as insert_image CTMs.
+    The saved PDF becomes image-only, but it is robust: the output is literally
+    the rendered page plus the same stamp pixels the GUI preview draws.
     """
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QImage, QPainter
+    from PyQt6.QtGui import QPainter
 
-    pixel_width = max(1, int(round(page.rect.width * scale)))
-    pixel_height = max(1, int(round(page.rect.height * scale)))
-    image = QImage(pixel_width, pixel_height, QImage.Format.Format_ARGB32_Premultiplied)
-    image.fill(Qt.GlobalColor.transparent)
-
+    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+    image = _pixmap_to_qimage(pix)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     try:
         for stamp in stamps:
-            overlay_stamp = _stamp_for_overlay_coordinates(page, stamp)
-            if overlay_stamp.kind == "signature":
-                _draw_signature_stamp(painter, overlay_stamp, scale)
+            if stamp.kind == "signature":
+                _draw_signature_stamp(painter, stamp, scale)
             else:
-                _draw_text_stamp(painter, overlay_stamp, scale)
+                _draw_text_stamp(painter, stamp, scale)
     finally:
         painter.end()
     return _qimage_to_png_bytes(image)
@@ -196,19 +171,16 @@ class PDFDocumentService:
         overwriting_original = source_path == target_path
         temp_output: Path | None = None
         source = fitz.open(source_path)
-        output = fitz.open()
+        flattened = fitz.open()
         stamps_by_page: dict[int, list[PlacedStamp]] = defaultdict(list)
         for stamp in stamps:
             stamps_by_page[stamp.page_index].append(stamp)
 
         try:
-            output.insert_pdf(source)
-            for page_index, page_stamps in stamps_by_page.items():
-                if not page_stamps:
-                    continue
-                page = output[page_index]
-                overlay_png = _transparent_overlay_png_bytes(page, page_stamps)
-                page.insert_image(page.rect, stream=overlay_png, keep_proportion=False, overlay=True)
+            for page_index, source_page in enumerate(source):
+                output_page = flattened.new_page(width=source_page.rect.width, height=source_page.rect.height)
+                page_png = _flatten_page_to_png_bytes(source_page, stamps_by_page[page_index])
+                output_page.insert_image(output_page.rect, stream=page_png, keep_proportion=False, overlay=True)
 
             if overwriting_original:
                 with NamedTemporaryFile(
@@ -218,12 +190,12 @@ class PDFDocumentService:
                     delete=False,
                 ) as temp_file:
                     temp_output = Path(temp_file.name)
-                output.save(temp_output, garbage=4, deflate=True)
+                flattened.save(temp_output, garbage=4, deflate=True)
             else:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                output.save(target_path, garbage=4, deflate=True)
+                flattened.save(target_path, garbage=4, deflate=True)
         finally:
-            output.close()
+            flattened.close()
             source.close()
 
         if overwriting_original and temp_output is not None:
