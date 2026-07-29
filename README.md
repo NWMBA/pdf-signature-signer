@@ -23,7 +23,7 @@ This app is built for that exact job.
 - Live signature preview under cursor
 - Resize signature with a slider or mouse wheel while placing
 - Rotate the stamp in 90° steps if a PDF or image orientation is odd
-- Uses one shared signature-image pipeline for both preview and PDF save, including image orientation metadata from phones/scanners, so the saved PDF matches what the app showed before saving
+- Uses a flattened save engine: each output page is rendered as pixels, stamps are drawn into those pixels, and the result is saved as a new image-backed PDF page. This trades selectable text for reliability: the saved PDF should match the visible preview instead of depending on PDF image-transform behavior.
 - Drag placed signatures before saving
 - Delete selected signatures before saving
 - Save As by default, overwrite only with confirmation

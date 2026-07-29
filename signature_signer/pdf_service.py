@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import fitz
 
 from .models import PlacedStamp
-from .pdf_geometry import displayed_rect_to_pdf_rect
+
+FLATTEN_SCALE = 3.0
 
 
 def signature_image_bytes_for_pdf(image_path: str, rotation: int = 0) -> bytes:
-    """Return PNG bytes for both preview and PDF embedding.
+    """Return PNG bytes for both preview and flattened PDF output.
 
     The signer has one non-negotiable rule: what the user sees in the live
     preview must be what gets saved into the PDF. Qt's image reader is used here
@@ -49,6 +51,84 @@ def signature_image_bytes_for_pdf(image_path: str, rotation: int = 0) -> bytes:
     return bytes(data)
 
 
+def _qimage_to_png_bytes(image) -> bytes:
+    from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
+
+    data = QByteArray()
+    buffer = QBuffer(data)
+    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+        raise ValueError("Could not prepare flattened page image")
+    if not image.save(buffer, "PNG"):
+        raise ValueError("Could not encode flattened page image")
+    buffer.close()
+    return bytes(data)
+
+
+def _pixmap_to_qimage(pix: fitz.Pixmap):
+    from PyQt6.QtGui import QImage
+
+    return QImage(
+        pix.samples,
+        pix.width,
+        pix.height,
+        pix.stride,
+        QImage.Format.Format_RGB888,
+    ).copy()
+
+
+def _draw_signature_stamp(painter, stamp: PlacedStamp, scale: float) -> None:
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QImage
+
+    signature = QImage()
+    image_bytes = signature_image_bytes_for_pdf(stamp.image_path, stamp.rotation)
+    if not signature.loadFromData(image_bytes, "PNG") or signature.isNull():
+        raise ValueError(f"Could not load signature image for drawing: {stamp.image_path}")
+
+    target = QRectF(stamp.x * scale, stamp.y * scale, stamp.width * scale, stamp.height * scale)
+    painter.drawImage(target, signature)
+
+
+def _draw_text_stamp(painter, stamp: PlacedStamp, scale: float) -> None:
+    from PyQt6.QtCore import QRectF, Qt
+    from PyQt6.QtGui import QColor, QFont
+
+    painter.save()
+    painter.setPen(QColor("#000000"))
+    font = QFont("Helvetica")
+    font.setPixelSize(max(10, int(stamp.height * scale * 0.58)))
+    painter.setFont(font)
+    rect = QRectF(stamp.x * scale, stamp.y * scale, stamp.width * scale, stamp.height * scale)
+    painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, stamp.text)
+    painter.restore()
+
+
+def _flatten_page_to_png_bytes(page: fitz.Page, stamps: list[PlacedStamp], scale: float = FLATTEN_SCALE) -> bytes:
+    """Render the page and draw stamps into the pixels that become the output.
+
+    This deliberately avoids PDF overlay transforms such as insert_image CTMs.
+    The saved PDF becomes image-only, but it is robust: the output is literally
+    the rendered page plus the same stamp pixels the GUI preview draws.
+    """
+    from PyQt6.QtGui import QPainter
+
+    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+    image = _pixmap_to_qimage(pix)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    try:
+        for stamp in stamps:
+            if stamp.kind == "signature":
+                _draw_signature_stamp(painter, stamp, scale)
+            else:
+                _draw_text_stamp(painter, stamp, scale)
+    finally:
+        painter.end()
+    return _qimage_to_png_bytes(image)
+
+
 class PDFDocumentService:
     def __init__(self) -> None:
         self.doc: fitz.Document | None = None
@@ -76,19 +156,11 @@ class PDFDocumentService:
         return rect.width, rect.height
 
     def render_page(self, page_index: int, zoom: float):
-        from PyQt6.QtGui import QImage, QPixmap
+        from PyQt6.QtGui import QPixmap
 
         page = self._page(page_index)
-        matrix = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        image = QImage(
-            pix.samples,
-            pix.width,
-            pix.height,
-            pix.stride,
-            QImage.Format.Format_RGB888,
-        ).copy()
-        return QPixmap.fromImage(image)
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        return QPixmap.fromImage(_pixmap_to_qimage(pix))
 
     def save_with_stamps(self, output_path: str, stamps: list[PlacedStamp]) -> None:
         if not self.path:
@@ -99,28 +171,16 @@ class PDFDocumentService:
         overwriting_original = source_path == target_path
         temp_output: Path | None = None
         source = fitz.open(source_path)
+        flattened = fitz.open()
+        stamps_by_page: dict[int, list[PlacedStamp]] = defaultdict(list)
+        for stamp in stamps:
+            stamps_by_page[stamp.page_index].append(stamp)
+
         try:
-            for stamp in stamps:
-                page = source[stamp.page_index]
-                displayed_rect = fitz.Rect(stamp.x, stamp.y, stamp.x + stamp.width, stamp.y + stamp.height)
-                rect = displayed_rect_to_pdf_rect(page, displayed_rect)
-                if stamp.kind == "signature":
-                    image_bytes = signature_image_bytes_for_pdf(stamp.image_path, stamp.rotation)
-                    write_rotation = page.rotation % 360
-                    page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True, rotate=write_rotation)
-                else:
-                    write_rotation = (page.rotation + stamp.rotation) % 360
-                    fontsize = max(8.0, stamp.height * 0.58)
-                    page.insert_textbox(
-                        rect,
-                        stamp.text,
-                        fontname="helv",
-                        fontsize=fontsize,
-                        color=(0, 0, 0),
-                        align=fitz.TEXT_ALIGN_LEFT,
-                        overlay=True,
-                        rotate=write_rotation,
-                    )
+            for page_index, source_page in enumerate(source):
+                output_page = flattened.new_page(width=source_page.rect.width, height=source_page.rect.height)
+                page_png = _flatten_page_to_png_bytes(source_page, stamps_by_page[page_index])
+                output_page.insert_image(output_page.rect, stream=page_png, keep_proportion=False, overlay=True)
 
             if overwriting_original:
                 with NamedTemporaryFile(
@@ -130,11 +190,12 @@ class PDFDocumentService:
                     delete=False,
                 ) as temp_file:
                     temp_output = Path(temp_file.name)
-                source.save(temp_output, garbage=4, deflate=True)
+                flattened.save(temp_output, garbage=4, deflate=True)
             else:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                source.save(target_path, garbage=4, deflate=True)
+                flattened.save(target_path, garbage=4, deflate=True)
         finally:
+            flattened.close()
             source.close()
 
         if overwriting_original and temp_output is not None:
