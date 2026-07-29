@@ -13,14 +13,10 @@ def signature_image_bytes_for_pdf(image_path: str, rotation: int = 0) -> bytes:
     """Return PNG bytes for both preview and PDF embedding.
 
     The signer has one non-negotiable rule: what the user sees in the live
-    preview must be what gets saved into the PDF. Qt's image readers can apply
-    EXIF/orientation metadata while other Qt paths and MuPDF may not, which can
-    make a visually correct preview save upside down or mirrored for some PNGs.
-
-    Therefore this function intentionally disables automatic metadata-based
-    transforms and treats the signature file pixels as authoritative. Manual
-    stamp rotation is still baked in explicitly so the Rotate button remains
-    predictable.
+    preview must be what gets saved into the PDF. Qt's image reader is used here
+    as the single source of truth for image decoding, including orientation
+    metadata from files created by phones or scanners. Manual stamp rotation is
+    still baked in explicitly so the Rotate button remains predictable.
     """
     try:
         from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
@@ -34,7 +30,7 @@ def signature_image_bytes_for_pdf(image_path: str, rotation: int = 0) -> bytes:
         return Path(image_path).read_bytes()
 
     reader = QImageReader(image_path)
-    reader.setAutoTransform(False)
+    reader.setAutoTransform(True)
     image = reader.read()
     if image.isNull():
         raise ValueError(f"Could not read signature image: {image_path}")

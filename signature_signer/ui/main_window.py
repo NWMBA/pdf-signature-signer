@@ -355,12 +355,21 @@ class MainWindow(QMainWindow):
         self.scale_slider.setValue(value)
 
     def rotate_stamp(self) -> None:
+        selected_id = self.state.selected_stamp_id
+        if selected_id is not None:
+            for stamp in self.state.stamps:
+                if stamp.id == selected_id:
+                    stamp.rotation = (stamp.rotation + 90) % 360
+                    self.refresh_stamps()
+                    self.status_label.setText(f"Selected stamp rotation: {stamp.rotation}°")
+                    return
+
         self.stamp_rotation = (self.stamp_rotation + 90) % 360
         self.config.stamp_rotation = self.stamp_rotation
         self.config_manager.save(self.config)
         self.rotate_button.setText(f"Rotate: {self.stamp_rotation}°")
         self._push_preview_payload_to_view()
-        self.status_label.setText(f"Stamp rotation: {self.stamp_rotation}°")
+        self.status_label.setText(f"New stamp rotation: {self.stamp_rotation}°")
 
     def toggle_placement_mode(self) -> None:
         self.placing_enabled = not self.placing_enabled

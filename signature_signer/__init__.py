@@ -1,4 +1,4 @@
 """PDF Signature Signer package."""
 
-__version__ = "0.1.3"
-__build__ = "preview-save-match"
+__version__ = "0.1.4"
+__build__ = "shared-image-orientation"
