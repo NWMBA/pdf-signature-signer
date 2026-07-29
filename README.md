@@ -23,7 +23,7 @@ This app is built for that exact job.
 - Live signature preview under cursor
 - Resize signature with a slider or mouse wheel while placing
 - Rotate the stamp in 90° steps if a PDF or image orientation is odd
-- Uses a flattened save engine: each output page is rendered as pixels, stamps are drawn into those pixels, and the result is saved as a new image-backed PDF page. This trades selectable text for reliability: the saved PDF should match the visible preview instead of depending on PDF image-transform behavior.
+- Uses a selectable full-page transparent overlay save engine: original PDF text stays selectable/searchable, while signatures are first drawn into one page-sized transparent image and then placed over the page to avoid small-image transform bugs.
 - Drag placed signatures before saving
 - Delete selected signatures before saving
 - Save As by default, overwrite only with confirmation
